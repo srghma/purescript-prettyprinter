@@ -3,9 +3,10 @@ module Prettyprinter (
     Doc(..),
 
     -- * Basic functionality
-    class Pretty, pretty, prettyList,
+    -- | class Pretty, pretty, prettyList,
 
-    viaShow, unsafeViaShow, unsafeStringWithoutNewlines,
+    -- | viaShow, unsafeViaShow,
+    text,
     emptyDoc, nest, line, line', softline, softline', hardline,
 
     -- ** Primitives for alternative layouts
@@ -35,15 +36,6 @@ module Prettyprinter (
 
     -- * General convenience
     plural, enclose, surround,
-
-    -- ** Annotations
-    annotate,
-    unAnnotate,
-    reAnnotate,
-    alterAnnotations,
-    unAnnotateS,
-    reAnnotateS,
-    alterAnnotationsS,
 
     -- * Optimization
     fuse, FusionDepth(..),
@@ -81,6 +73,8 @@ import Data.String.Regex.Flags  as String.Regex
 import Data.String.Regex.Unsafe as String.Regex
 import Data.Container.Class     (class Container)
 import Data.Container.Class     as Container
+import Data.Renderable (class Renderable)
+import Data.Renderable as Renderable
 
 -- Depending on the Cabal file, this might be from base, or for older builds,
 -- from the semigroups package.
@@ -130,7 +124,7 @@ data Doc ann =
     --
     -- Since the frequently used 'String.length' of 'Text' is /O(length)/, we cache
     -- it in this constructor.
-    | Text Int String
+    | Text Int ann
 
     -- | Hard line break
     | Line
@@ -164,7 +158,7 @@ data Doc ann =
 
     -- | Add an annotation to the enclosed 'Doc'. Can be used for example to add
     -- styling directives or alt texts that can then be used by the renderer.
-    | Annotated ann (Doc ann)
+    -- | | Annotated ann (Doc ann)
 
 -- |
 -- @
@@ -175,27 +169,6 @@ data Doc ann =
 -- helloworld
 instance semigroupDoc :: Semigroup (Doc ann) where
     append = Cat
-    -- | sconcat (x :| xs) = hcat (x:xs)
-    -- | stimes n x
-    -- |   | n <= 0    = Empty
-    -- |   | n == 1    = x
-    -- |   | otherwise =
-    -- |       let n' = fromIntegral n
-    -- |           nx = hcat (replicate n' x)
-    -- |       in case x of
-    -- |           Fail            -> Fail
-    -- |           Empty           -> Empty
-    -- |           Char c          -> Text n' (String.replicate n' (String.singleton c))
-    -- |           Text l t        -> Text (n' * l) (String.replicate n' t)
-    -- |           Line            -> nx
-    -- |           FlatAlt{}       -> nx
-    -- |           Cat{}           -> nx
-    -- |           Nest{}          -> nx
-    -- |           Union{}         -> nx
-    -- |           Column{}        -> nx
-    -- |           WithPageWidth{} -> nx
-    -- |           Nesting{}       -> nx
-    -- |           Annotated{}     -> nx
 
 -- |
 -- @
@@ -216,171 +189,18 @@ instance monoidDoc :: Monoid (Doc ann) where
 -- using the latter when the type does not matter.
 derive instance functorDoc :: Functor Doc
 
--- | Overloaded conversion to 'Doc'.
---
--- Laws:
---
---   1. output should be pretty. :-)
-class Pretty a where
-  -- | >>> pretty 1 <+> pretty "hello" <+> pretty 1.234
-  -- 1 hello 1.234
-  pretty :: forall ann . a -> Doc ann
-
-  -- | @'prettyList'@ is only used to define the @instance
-  -- 'Pretty' a => 'Pretty' (Array a)@. In normal circumstances only the @'pretty'@
-  -- function is used.
-  --
-  -- >>> prettyList [1, 23, 456]
-  -- [1, 23, 456]
-  prettyList :: forall ann . Array a -> Doc ann
-
-prettyListDefault :: forall ann a. Pretty a => Array a -> Doc ann
-prettyListDefault = align <<< list <<< map pretty
-
--- $
--- Issue #67: Nested lists were not aligned with »pretty«, leading to non-pretty
--- output, violating the Pretty class law.
---
--- >>> pretty (replicate 2 (replicate 4 (1, replicate 8 2)))
--- [ [ (1, [2, 2, 2, 2, 2, 2, 2, 2])
---   , (1, [2, 2, 2, 2, 2, 2, 2, 2])
---   , (1, [2, 2, 2, 2, 2, 2, 2, 2])
---   , (1, [2, 2, 2, 2, 2, 2, 2, 2]) ]
--- , [ (1, [2, 2, 2, 2, 2, 2, 2, 2])
---   , (1, [2, 2, 2, 2, 2, 2, 2, 2])
---   , (1, [2, 2, 2, 2, 2, 2, 2, 2])
---   , (1, [2, 2, 2, 2, 2, 2, 2, 2]) ] ]
-
-instance prettyConst :: Pretty a => Pretty (Const a b) where
-  pretty = pretty <<< unwrap
-  prettyList = prettyListDefault
-
--- | >>> pretty (Identity 1)
--- 1
-instance prettyIdentity :: Pretty a => Pretty (Identity a) where
-  pretty = pretty <<< unwrap
-  prettyList = prettyListDefault
-
--- | >>> pretty [1,2,3]
--- [1, 2, 3]
-instance prettyArray :: Pretty a => Pretty (Array a) where
-    pretty = prettyList
-    prettyList = prettyListDefault
-
-instance prettyNonEmptyArray :: Pretty a => Pretty (NonEmptyArray a) where
-    pretty = prettyList <<< NonEmptyArray.toArray
-    prettyList = prettyListDefault
-
--- | >>> pretty ()
--- ()
---
--- The argument is not used,
---
--- >>> pretty (error "Strict?" :: ())
--- ()
-instance prettyUnit :: Pretty Unit where
-    pretty _ = (unsafeStringWithoutNewlines "unit")
-    prettyList x = prettyListDefault x
-
--- | >>> pretty true
--- true
-instance prettyBoolean :: Pretty Boolean where
-    pretty true  = (unsafeStringWithoutNewlines "true")
-    pretty false = (unsafeStringWithoutNewlines "false")
-    prettyList x = prettyListDefault x
-
--- | Instead of @('pretty' '\n')@, consider using @'line'@ as a more readable
--- alternative.
---
--- >>> pretty 'f' <> pretty 'o' <> pretty 'o'
--- foo
--- >>> pretty ("string" :: String)
--- string
-instance prettyChar :: Pretty Char where
-    pretty '\n' = line
-    pretty c = Text 1 (String.singleton c)
-
-    prettyList x = prettyListDefault x
-
--- | Convenience function to convert a 'Show'able value to a 'Doc'. If the
--- 'String' does not contain newlines, consider using the more performant
--- 'unsafeViaShow'.
-viaShow :: forall a ann . Show a => a -> Doc ann
-viaShow = pretty <<< show
-
--- | Convenience function to convert a 'Show'able value /that must not contain
--- newlines/ to a 'Doc'. If there may be newlines, use 'viaShow' instead.
-unsafeViaShow :: forall a ann . Show a => a -> Doc ann
-unsafeViaShow = unsafeStringWithoutNewlines <<< show
-
--- | >>> pretty (123 :: Int)
--- 123
-instance prettyInt :: Pretty Int    where
-  pretty = unsafeViaShow
-  prettyList x = prettyListDefault x
-
--- | >>> pretty (pi :: Number)
--- 3.1415927
-instance prettyNumber :: Pretty Number where
-  pretty = unsafeViaShow
-  prettyList x = prettyListDefault x
-
--- | >>> pretty (123, "hello")
--- (123, hello)
-instance prettyTuple :: (Pretty a1, Pretty a2) => Pretty (Tuple a1 a2) where
-    pretty (Tuple x1 x2) = tupled [pretty x1, pretty x2]
-    prettyList x = prettyListDefault x
-
--- | Ignore 'Nothing's, print 'Just' contents.
---
--- >>> pretty (Just true)
--- true
--- >>> braces (pretty (Nothing :: Maybe Boolean))
--- {}
---
--- >>> pretty [Just 1, Nothing, Just 3, Nothing]
--- [1, 3]
-instance prettyMaybe :: Pretty a => Pretty (Maybe a) where
-    pretty = maybe mempty pretty
-    prettyList = prettyList <<< Array.catMaybes
-
--- | Automatically converts all newlines to @'line'@.
---
--- >>> pretty ("hello\nworld" :: String)
--- hello
--- world
---
--- Note that  @'line'@ can be undone by @'group'@:
---
--- >>> group (pretty ("hello\nworld" :: String))
--- hello world
---
--- Manually use @'hardline'@ if you /definitely/ want newlines.
-instance prettyString :: Pretty String where
-  pretty = stringWithNewlines
-  prettyList x = prettyListDefault x
-
--- | Finding a good example for printing something that does not exist is hard,
--- so here is an example of printing a list full of nothing.
---
--- >>> pretty ([] :: Array (Void))
--- []
-instance prettyVoid :: Pretty Void where
-  pretty = absurd
-  prettyList x = prettyListDefault x
-
 -- | @(unsafeStringWithoutNewlines s)@ contains the literal string @s@.
 --
 -- The string must not contain any newline characters, since this is an
 -- invariant of the 'String' constructor.
-unsafeStringWithoutNewlines :: forall ann . String -> Doc ann
-unsafeStringWithoutNewlines text =
-  if String.null text
-    then Empty
-    else Text (String.length text) text
-
-stringWithNewlines :: forall ann . String -> Doc ann
-stringWithNewlines = vsep <<< map unsafeStringWithoutNewlines <<< String.split (String.Pattern "\n")
+text :: forall ann . Renderable ann => ann -> Doc ann
+text a =
+  let
+    w = Renderable.width a
+   in
+    if w == 0
+      then Empty
+      else Text w a
 
 -- | The empty document behaves like @('pretty' "")@, so it has a height of 1.
 -- This may lead to surprising behaviour if we expect it to bear no weight
@@ -432,8 +252,8 @@ nest i x = Nest i x
 --
 -- >>> group doc
 -- lorem ipsum dolor sit amet
-line :: forall ann . Doc ann
-line = FlatAlt Line (Text 1 " ")
+line :: forall ann . Renderable ann => Doc ann
+line = FlatAlt Line (Text 1 Renderable.space)
 
 -- | @'line''@ is like @'line'@, but behaves like @'mempty'@ if the line break
 -- is undone by 'group' (instead of @'space'@).
@@ -465,8 +285,8 @@ line' = FlatAlt Line Empty
 -- @
 -- 'softline' = 'group' 'line'
 -- @
-softline :: forall ann . Doc ann
-softline = Union (Text 1 " ") Line
+softline :: forall ann . Renderable ann => Doc ann
+softline = Union (Text 1 Renderable.space) Line
 
 -- | @'softline''@ is like @'softline'@, but behaves like @'mempty'@ if the
 -- resulting output does not fit on the page (instead of @'space'@). In other
@@ -565,7 +385,7 @@ changesUponFlattening = \doc -> case doc of
     Line            -> NeverFlat
     Union x _       -> Flattened x
     Nest i x        -> map (Nest i) (changesUponFlattening x)
-    Annotated ann x -> map (Annotated ann) (changesUponFlattening x)
+    -- | Annotated ann x -> map (Annotated ann) (changesUponFlattening x)
 
     Column f        -> Flattened (Column (flatten <<< f))
     Nesting f       -> Flattened (Nesting (flatten <<< f))
@@ -594,7 +414,7 @@ changesUponFlattening = \doc -> case doc of
         Column f        -> Column (flatten <<< f)
         WithPageWidth f -> WithPageWidth (flatten <<< f)
         Nesting f       -> Nesting (flatten <<< f)
-        Annotated ann x -> Annotated ann (flatten x)
+        -- | Annotated ann x -> Annotated ann (flatten x)
 
         x@Fail   -> x
         x@Empty  -> x
@@ -793,9 +613,9 @@ encloseSep l r s ds = case ds of
 -- , 300
 -- , 4000 ]
 list :: forall ann . Array (Doc ann) -> Doc ann
-list = group <<< encloseSep (flatAlt (unsafeStringWithoutNewlines "[ ") (unsafeStringWithoutNewlines "["))
-                            (flatAlt (unsafeStringWithoutNewlines " ]") (unsafeStringWithoutNewlines "]"))
-                            (unsafeStringWithoutNewlines ", ")
+list = group <<< encloseSep (flatAlt (text "[ ") (text "["))
+                            (flatAlt (text " ]") (text "]"))
+                            (text ", ")
 
 -- | Haskell-inspired variant of 'encloseSep' with parentheses and comma as
 -- separator.
@@ -811,9 +631,9 @@ list = group <<< encloseSep (flatAlt (unsafeStringWithoutNewlines "[ ") (unsafeS
 -- , 300
 -- , 4000 )
 tupled :: forall ann . Array (Doc ann) -> Doc ann
-tupled = group <<< encloseSep (flatAlt (unsafeStringWithoutNewlines "( ") (unsafeStringWithoutNewlines "("))
-                              (flatAlt (unsafeStringWithoutNewlines " )") (unsafeStringWithoutNewlines ")"))
-                              (unsafeStringWithoutNewlines ", ")
+tupled = group <<< encloseSep (flatAlt (text "( ") (text "("))
+                              (flatAlt (text " )") (text ")"))
+                              (text ", ")
 
 
 
@@ -1159,10 +979,10 @@ fillBreak f x = width x (\w ->
         else spaces (f - w))
 
 -- | Insert a number of spaces. Negative values count as 0.
-spaces :: forall ann . Int -> Doc ann
+spaces :: forall ann . Renderable ann => Int -> Doc ann
 spaces n
   | n <= 0    = Empty
-  | otherwise = Text n (textSpaces n)
+  | otherwise = Text n (fold $ Array.replicate n Renderable.space)
 
 -- $
 -- prop> \(NonNegative n) -> length (show (spaces n)) == n
@@ -1232,139 +1052,139 @@ surround x l r = l <> x <> r
 
 
 
--- | Add an annotation to a @'Doc'@. This annotation can then be used by the
--- renderer to e.g. add color to certain parts of the output. For a full
--- tutorial example on how to use it, see the
--- "Prettyprinter.Render.Tutorials.StackMachineTutorial" or
--- "Prettyprinter.Render.Tutorials.TreeRenderingTutorial" modules.
---
--- This function is only relevant for custom formats with their own annotations,
--- and not relevant for basic prettyprinting. The predefined renderers, e.g.
--- "Prettyprinter.Render.Text", should be enough for the most common
--- needs.
-annotate :: forall ann . ann -> Doc ann -> Doc ann
-annotate = Annotated
-
--- | Remove all annotations.
---
--- Although 'unAnnotate' is idempotent with respect to rendering,
---
--- @
--- 'unAnnotate' <<< 'unAnnotate' = 'unAnnotate'
--- @
---
--- it should not be used without caution, for each invocation traverses the
--- entire contained document. If possible, it is preferrable to unannotate after
--- producing the layout by using 'unAnnotateS'.
-unAnnotate :: forall ann xxx . Doc ann -> Doc xxx
-unAnnotate = alterAnnotations (const [])
-
--- | Change the annotation of a 'Doc'ument.
---
--- Useful in particular to embed documents with one form of annotation in a more
--- generlly annotated document.
---
--- Since this traverses the entire @'Doc'@ tree, including parts that are not
--- rendered due to other layouts fitting better, it is preferrable to reannotate
--- after producing the layout by using @'reAnnotateS'@.
---
--- Since @'reAnnotate'@ has the right type and satisfies @'reAnnotate id = id'@,
--- it is used to define the @'Functor'@ instance of @'Doc'@.
-reAnnotate :: forall ann ann' . (ann -> ann') -> Doc ann -> Doc ann'
-reAnnotate re = alterAnnotations (pure <<< re)
-
--- | Change the annotations of a 'Doc'ument. Individual annotations can be
--- removed, changed, or replaced by multiple ones.
---
--- This is a general function that combines 'unAnnotate' and 'reAnnotate', and
--- it is useful for mapping semantic annotations (such as »this is a keyword«)
--- to display annotations (such as »this is red and underlined«), because some
--- backends may not care about certain annotations, while others may.
---
--- Annotations earlier in the new list will be applied earlier, i.e. returning
--- @[Bold, Green]@ will result in a bold document that contains green text, and
--- not vice-versa.
---
--- Since this traverses the entire @'Doc'@ tree, including parts that are not
--- rendered due to other layouts fitting better, it is preferrable to reannotate
--- after producing the layout by using @'alterAnnotationsS'@.
-alterAnnotations :: forall ann ann' . (ann -> Array ann') -> Doc ann -> Doc ann'
-alterAnnotations re = go
-  where
-    go = \doc -> case doc of
-        Fail     -> Fail
-        Empty    -> Empty
-        Text l t -> Text l t
-        Line     -> Line
-
-        FlatAlt x y     -> FlatAlt (go x) (go y)
-        Cat x y         -> Cat (go x) (go y)
-        Nest i x        -> Nest i (go x)
-        Union x y       -> Union (go x) (go y)
-        Column f        -> Column (go <<< f)
-        WithPageWidth f -> WithPageWidth (go <<< f)
-        Nesting f       -> Nesting (go <<< f)
-        Annotated ann x -> foldr Annotated (go x) (re ann)
-
--- $
--- >>> let doc = "lorem" <+> annotate () "ipsum" <+> "dolor"
--- >>> let re () = ["FOO", "BAR"]
--- >>> layoutPretty defaultLayoutOptions (alterAnnotations re doc)
--- SText 5 "lorem" (SText 1 " " (SAnnPush "FOO" (SAnnPush "BAR" (SText 5 "ipsum" (SAnnPop (SAnnPop (SText 1 " " (SText 5 "dolor" SEmpty))))))))
-
--- | Remove all annotations. 'unAnnotate' for 'SimpleDocStream'.
-unAnnotateS :: forall ann xxx . SimpleDocStream ann -> SimpleDocStream xxx
-unAnnotateS = go
-  where
-    go = \doc -> case doc of
-        SFail              -> SFail
-        SEmpty             -> SEmpty
-        SText l t rest     -> SText l t (go rest)
-        SLine l rest       -> SLine l (go rest)
-        SAnnPop rest       -> go rest
-        SAnnPush _ann rest -> go rest
-
--- | Change the annotation of a document. 'reAnnotate' for 'SimpleDocStream'.
-reAnnotateS :: forall ann ann' . (ann -> ann') -> SimpleDocStream ann -> SimpleDocStream ann'
-reAnnotateS re = go
-  where
-    go = \doc -> case doc of
-        SFail             -> SFail
-        SEmpty            -> SEmpty
-        SText l t rest    -> SText l t (go rest)
-        SLine l rest      -> SLine l (go rest)
-        SAnnPop rest      -> SAnnPop (go rest)
-        SAnnPush ann rest -> SAnnPush (re ann) (go rest)
-
-data AnnotationRemoval = Remove | DontRemove
-
--- | Change the annotation of a document to a different annotation, or none at
--- all. 'alterAnnotations' for 'SimpleDocStream'.
---
--- Note that the 'Doc' version is more flexible, since it allows changing a
--- single annotation to multiple ones.
--- ('Prettyprinter.Render.Util.SimpleDocTree.SimpleDocTree' restores
--- this flexibility again.)
-alterAnnotationsS :: forall ann ann' . (ann -> Maybe ann') -> SimpleDocStream ann -> SimpleDocStream ann'
-alterAnnotationsS re = go []
-  where
-    -- We keep a stack of whether to remove a pop so that we can remove exactly
-    -- the pops corresponding to annotations that mapped to Nothing.
-    go stack = \sds -> case sds of
-        SFail             -> SFail
-        SEmpty            -> SEmpty
-        SText l t rest    -> SText l t (go stack rest)
-        SLine l rest      -> SLine l (go stack rest)
-        SAnnPush ann rest -> case re ann of
-            Nothing   -> go (Array.cons Remove stack) rest
-            Just ann' -> SAnnPush ann' (go (Array.cons DontRemove stack) rest)
-        SAnnPop rest      ->
-          case Array.uncons stack of
-            Nothing                -> unsafeCrashWith panicPeekedEmpty
-            Just { head, tail: stack' } ->
-              case head of
-                   DontRemove -> SAnnPop (go stack' rest)
-                   Remove     -> go stack' rest
+-- || -- | Add an annotation to a @'Doc'@. This annotation can then be used by the
+-- || -- renderer to e.g. add color to certain parts of the output. For a full
+-- || -- tutorial example on how to use it, see the
+-- || -- "Prettyprinter.Render.Tutorials.StackMachineTutorial" or
+-- || -- "Prettyprinter.Render.Tutorials.TreeRenderingTutorial" modules.
+-- || --
+-- || -- This function is only relevant for custom formats with their own annotations,
+-- || -- and not relevant for basic prettyprinting. The predefined renderers, e.g.
+-- || -- "Prettyprinter.Render.Text", should be enough for the most common
+-- || -- needs.
+-- || annotate :: forall ann . ann -> Doc ann -> Doc ann
+-- || annotate = Annotated
+-- ||
+-- || -- | Remove all annotations.
+-- || --
+-- || -- Although 'unAnnotate' is idempotent with respect to rendering,
+-- || --
+-- || -- @
+-- || -- 'unAnnotate' <<< 'unAnnotate' = 'unAnnotate'
+-- || -- @
+-- || --
+-- || -- it should not be used without caution, for each invocation traverses the
+-- || -- entire contained document. If possible, it is preferrable to unannotate after
+-- || -- producing the layout by using 'unAnnotateS'.
+-- || unAnnotate :: forall ann xxx . Doc ann -> Doc xxx
+-- || unAnnotate = alterAnnotations (const [])
+-- ||
+-- || -- | Change the annotation of a 'Doc'ument.
+-- || --
+-- || -- Useful in particular to embed documents with one form of annotation in a more
+-- || -- generlly annotated document.
+-- || --
+-- || -- Since this traverses the entire @'Doc'@ tree, including parts that are not
+-- || -- rendered due to other layouts fitting better, it is preferrable to reannotate
+-- || -- after producing the layout by using @'reAnnotateS'@.
+-- || --
+-- || -- Since @'reAnnotate'@ has the right type and satisfies @'reAnnotate id = id'@,
+-- || -- it is used to define the @'Functor'@ instance of @'Doc'@.
+-- || reAnnotate :: forall ann ann' . (ann -> ann') -> Doc ann -> Doc ann'
+-- || reAnnotate re = alterAnnotations (pure <<< re)
+-- ||
+-- || -- | Change the annotations of a 'Doc'ument. Individual annotations can be
+-- || -- removed, changed, or replaced by multiple ones.
+-- || --
+-- || -- This is a general function that combines 'unAnnotate' and 'reAnnotate', and
+-- || -- it is useful for mapping semantic annotations (such as »this is a keyword«)
+-- || -- to display annotations (such as »this is red and underlined«), because some
+-- || -- backends may not care about certain annotations, while others may.
+-- || --
+-- || -- Annotations earlier in the new list will be applied earlier, i.e. returning
+-- || -- @[Bold, Green]@ will result in a bold document that contains green text, and
+-- || -- not vice-versa.
+-- || --
+-- || -- Since this traverses the entire @'Doc'@ tree, including parts that are not
+-- || -- rendered due to other layouts fitting better, it is preferrable to reannotate
+-- || -- after producing the layout by using @'alterAnnotationsS'@.
+-- || alterAnnotations :: forall ann ann' . (ann -> Array ann') -> Doc ann -> Doc ann'
+-- || alterAnnotations re = go
+-- ||   where
+-- ||     go = \doc -> case doc of
+-- ||         Fail     -> Fail
+-- ||         Empty    -> Empty
+-- ||         Text l t -> Text l t
+-- ||         Line     -> Line
+-- ||
+-- ||         FlatAlt x y     -> FlatAlt (go x) (go y)
+-- ||         Cat x y         -> Cat (go x) (go y)
+-- ||         Nest i x        -> Nest i (go x)
+-- ||         Union x y       -> Union (go x) (go y)
+-- ||         Column f        -> Column (go <<< f)
+-- ||         WithPageWidth f -> WithPageWidth (go <<< f)
+-- ||         Nesting f       -> Nesting (go <<< f)
+-- ||         Annotated ann x -> foldr Annotated (go x) (re ann)
+-- ||
+-- || -- $
+-- || -- >>> let doc = "lorem" <+> annotate () "ipsum" <+> "dolor"
+-- || -- >>> let re () = ["FOO", "BAR"]
+-- || -- >>> layoutPretty defaultLayoutOptions (alterAnnotations re doc)
+-- || -- SText 5 "lorem" (SText 1 " " (SAnnPush "FOO" (SAnnPush "BAR" (SText 5 "ipsum" (SAnnPop (SAnnPop (SText 1 " " (SText 5 "dolor" SEmpty))))))))
+-- ||
+-- || -- | Remove all annotations. 'unAnnotate' for 'SimpleDocStream'.
+-- || unAnnotateS :: forall ann xxx . SimpleDocStream ann -> SimpleDocStream xxx
+-- || unAnnotateS = go
+-- ||   where
+-- ||     go = \doc -> case doc of
+-- ||         SFail              -> SFail
+-- ||         SEmpty             -> SEmpty
+-- ||         SText l t rest     -> SText l t (go rest)
+-- ||         SLine l rest       -> SLine l (go rest)
+-- ||         SAnnPop rest       -> go rest
+-- ||         SAnnPush _ann rest -> go rest
+-- ||
+-- || -- | Change the annotation of a document. 'reAnnotate' for 'SimpleDocStream'.
+-- || reAnnotateS :: forall ann ann' . (ann -> ann') -> SimpleDocStream ann -> SimpleDocStream ann'
+-- || reAnnotateS re = go
+-- ||   where
+-- ||     go = \doc -> case doc of
+-- ||         SFail             -> SFail
+-- ||         SEmpty            -> SEmpty
+-- ||         SText l t rest    -> SText l t (go rest)
+-- ||         SLine l rest      -> SLine l (go rest)
+-- ||         SAnnPop rest      -> SAnnPop (go rest)
+-- ||         SAnnPush ann rest -> SAnnPush (re ann) (go rest)
+-- ||
+-- || data AnnotationRemoval = Remove | DontRemove
+-- ||
+-- || -- | Change the annotation of a document to a different annotation, or none at
+-- || -- all. 'alterAnnotations' for 'SimpleDocStream'.
+-- || --
+-- || -- Note that the 'Doc' version is more flexible, since it allows changing a
+-- || -- single annotation to multiple ones.
+-- || -- ('Prettyprinter.Render.Util.SimpleDocTree.SimpleDocTree' restores
+-- || -- this flexibility again.)
+-- || alterAnnotationsS :: forall ann ann' . (ann -> Maybe ann') -> SimpleDocStream ann -> SimpleDocStream ann'
+-- || alterAnnotationsS re = go []
+-- ||   where
+-- ||     -- We keep a stack of whether to remove a pop so that we can remove exactly
+-- ||     -- the pops corresponding to annotations that mapped to Nothing.
+-- ||     go stack = \sds -> case sds of
+-- ||         SFail             -> SFail
+-- ||         SEmpty            -> SEmpty
+-- ||         SText l t rest    -> SText l t (go stack rest)
+-- ||         SLine l rest      -> SLine l (go stack rest)
+-- ||         SAnnPush ann rest -> case re ann of
+-- ||             Nothing   -> go (Array.cons Remove stack) rest
+-- ||             Just ann' -> SAnnPush ann' (go (Array.cons DontRemove stack) rest)
+-- ||         SAnnPop rest      ->
+-- ||           case Array.uncons stack of
+-- ||             Nothing                -> unsafeCrashWith panicPeekedEmpty
+-- ||             Just { head, tail: stack' } ->
+-- ||               case head of
+-- ||                    DontRemove -> SAnnPop (go stack' rest)
+-- ||                    Remove     -> go stack' rest
 
 -- | Fusion depth parameter, used by 'fuse'.
 data FusionDepth =
@@ -1434,7 +1254,7 @@ fuse depth = go
         Nest 0 x         -> go x
         Nest i x         -> Nest i (go x)
 
-        Annotated ann x -> Annotated ann (go x)
+        -- | Annotated ann x -> Annotated ann (go x)
 
         FlatAlt x1 x2 -> FlatAlt (go x1) (go x2)
         Union x1 x2   -> Union (go x1) (go x2)
@@ -1466,16 +1286,10 @@ data SimpleDocStream ann =
     | SEmpty
 
     -- | 'String.length' is /O(n)/, so we cache it in the 'Int' field.
-    | SText Int String (SimpleDocStream ann)
+    | SText Int ann (SimpleDocStream ann)
 
     -- | @Int@ = indentation level for the (next) line
     | SLine Int (SimpleDocStream ann)
-
-    -- | Add an annotation to the remaining document.
-    | SAnnPush ann (SimpleDocStream ann)
-
-    -- | Remove a previously pushed annotation.
-    | SAnnPop (SimpleDocStream ann)
 
 -- | Remove all trailing space characters.
 --
@@ -1887,7 +1701,7 @@ layoutWadlerLeijen
         Column f        -> best nl cc (Cons i (f cc) ds)
         WithPageWidth f -> best nl cc (Cons i (f pageWidth_) ds)
         Nesting f       -> best nl cc (Cons i (f i) ds)
-        Annotated ann x -> SAnnPush ann (best nl cc (Cons i x (UndoAnn ds)))
+        -- | Annotated ann x -> SAnnPush ann (best nl cc (Cons i x (UndoAnn ds)))
 
     -- Select the better fitting of two documents:
     -- Choice A if it fits, otherwise choice B.
@@ -2066,7 +1880,7 @@ layoutCompact = scan 0 <<< Array.singleton
               Column f        -> scan col (Array.cons (f col) ds)
               WithPageWidth f -> scan col (Array.cons (f Unbounded) ds)
               Nesting f       -> scan col (Array.cons (f 0) ds)
-              Annotated _ x   -> scan col (Array.cons x ds)
+              -- | Annotated _ x   -> scan col (Array.cons x ds)
 
 -- | @('show' doc)@ prettyprints document @doc@ with 'defaultLayoutOptions',
 -- ignoring all annotations.
