@@ -11,7 +11,7 @@ import Effect (Effect)
 import Effect.Random as Random
 import Test.Common (runTest)
 import Text.Lorem.Words as Lorem
-import Text.Pretty as Pretty
+import Prettyprinter as Prettyprinter
 
 test :: Effect Unit
 test = do
@@ -22,8 +22,8 @@ test = do
 testSoftWrap :: Int -> Array String -> Effect Unit
 testSoftWrap width words = runTest width (softWrap words)
 
-softWrap :: Array String -> Pretty.Doc String
-softWrap = Pretty.concatWith (Pretty.surround Pretty.softline) <<< map Pretty.text
+softWrap :: forall ann . Array String -> Prettyprinter.Doc ann
+softWrap = Prettyprinter.concatWith (Prettyprinter.surround Prettyprinter.softline) <<< map Prettyprinter.unsafeStringWithoutNewlines
 
 randomWords :: Int -> Effect (Array String)
 randomWords n = sequence (replicate n randomWord)

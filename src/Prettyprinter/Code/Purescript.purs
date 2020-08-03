@@ -1,14 +1,14 @@
-module Text.Pretty.Code.Purescript where
+module Prettyprinter.Code.Purescript where
 
 import Prelude
-import Text.Pretty
-import Data.Renderable (class Renderable)
+import Prettyprinter
+import Prettyprinter.Symbols.String
+
 import Data.Array as Array
 
 encloseSep
     :: forall a
-     . Renderable a
-    => Doc a   -- ^ left delimiter
+     . Doc a   -- ^ left delimiter
     -> Doc a   -- ^ right delimiter
     -> Doc a   -- ^ separator
     -> Array (Doc a) -- ^ input documents
@@ -34,8 +34,8 @@ encloseSep leftDelimiter rightDelimiter separator = case _ of
 -- , 300
 -- , 4000
 -- ]
-list :: Array (Doc String) -> Doc String
-list = group <<< encloseSep (text "[") (text "]") (text ", ")
+list :: forall ann . Array (Doc ann) -> Doc ann
+list = group <<< encloseSep (unsafeStringWithoutNewlines "[") (unsafeStringWithoutNewlines "]") (unsafeStringWithoutNewlines ", ")
 
 -- | Purescript-inspired variant of 'encloseSep' with parentheses and comma as
 -- separator.
@@ -51,5 +51,5 @@ list = group <<< encloseSep (text "[") (text "]") (text ", ")
 -- , 300
 -- , 4000
 -- )
-tupled :: Array (Doc String) -> Doc String
-tupled = group <<< encloseSep (text "(") (text ")") (text ", ")
+tupled :: forall ann . Array (Doc ann) -> Doc ann
+tupled = group <<< encloseSep (unsafeStringWithoutNewlines "(") (unsafeStringWithoutNewlines ")") (unsafeStringWithoutNewlines ", ")

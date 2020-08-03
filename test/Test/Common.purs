@@ -14,12 +14,12 @@ import Data.Foldable (fold)
 import Data.Unfoldable (replicate)
 import Effect (Effect)
 import Effect.Console as Console
-import Text.Pretty as Pretty
+import Prettyprinter as Prettyprinter
 
-runTest :: Int -> Pretty.Doc String -> Effect Unit
+runTest :: forall ann . Int -> Prettyprinter.Doc ann -> Effect Unit
 runTest width doc = do
   Console.log $ blue (rule width)
-  Console.log $ Pretty.render width doc
+  Console.log $ Prettyprinter.render (Prettyprinter.layoutPretty { layoutPageWidth: Prettyprinter.AvailablePerLine width 1.0 } doc)
   Console.log $ blue (rule width)
   Console.log "" -- for the newline
 

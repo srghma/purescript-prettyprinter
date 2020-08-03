@@ -11,6 +11,7 @@
     , "ansi"
     , "console"
     , "stringutils"
+    , "const"
     ]
 , packages =
     ./packages.dhall

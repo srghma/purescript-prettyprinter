@@ -4,8 +4,8 @@ import Prelude
 import Data.Tuple (Tuple(Tuple))
 import Effect (Effect)
 import Test.Common (runTest)
-import Text.Pretty (Doc, enclose, flatAltFn, group, indent, line, punctuate, sep, text, (<+>))
-import Text.Pretty.Symbols.String (comma, lbracket, rbracket, lbrace, rbrace, dquotes)
+import Prettyprinter
+import Prettyprinter.Symbols.String
 
 test :: Effect Unit
 test = do
@@ -49,37 +49,37 @@ data Json
 type Object
   = Array (Tuple String Json)
 
-prettyJson :: Json -> Doc String
-prettyJson JNull = text "null"
-prettyJson (JBool b) = if b then text "true" else text "false"
-prettyJson (JNumber n) = text (show n)
-prettyJson (JString s) = text s
+prettyJson :: forall ann . Json -> Doc ann
+prettyJson JNull = unsafeStringWithoutNewlines "null"
+prettyJson (JBool b) = if b then unsafeStringWithoutNewlines "true" else unsafeStringWithoutNewlines "false"
+prettyJson (JNumber n) = unsafeStringWithoutNewlines (show n)
+prettyJson (JString s) = unsafeStringWithoutNewlines s
 prettyJson (JArray vs) = group (prettyJsonArray vs)
 prettyJson (JObject o) = group (prettyJsonObject o)
 
-prettyJsonArray :: Array Json -> Doc String
-prettyJsonArray [] = text "[]"
+prettyJsonArray :: forall ann . Array Json -> Doc ann
+prettyJsonArray [] = unsafeStringWithoutNewlines "[]"
 prettyJsonArray vs =
   map prettyJson vs
     # punctuate comma
     >>> sep
-    >>> flatAltFn (indent 2) identity
+    >>> (\x -> flatAlt (indent 2 x) x)
     >>> brackets
 
-prettyJsonObject :: Object -> Doc String
-prettyJsonObject [] = text "{}"
+prettyJsonObject :: forall ann . Object -> Doc ann
+prettyJsonObject [] = unsafeStringWithoutNewlines "{}"
 prettyJsonObject o =
   map keyValue o
     # punctuate comma
     >>> sep
-    >>> flatAltFn (indent 2) identity
+    >>> (\x -> flatAlt (indent 2 x) x)
     >>> braces
   where
-  keyValue :: Tuple String Json -> Doc String
-  keyValue (Tuple k v) = dquotes (text k) <+> prettyJson v
+  keyValue :: forall ann . Tuple String Json -> Doc ann
+  keyValue (Tuple k v) = dquotes (unsafeStringWithoutNewlines k) <+> prettyJson v
 
-brackets :: Doc String -> Doc String
+brackets :: forall ann . Doc ann -> Doc ann
 brackets = enclose (lbracket <> line) (line <> rbracket)
 
-braces :: Doc String -> Doc String
+braces :: forall ann . Doc ann -> Doc ann
 braces = enclose (lbrace <> line) (line <> rbrace)

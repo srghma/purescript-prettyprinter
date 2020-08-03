@@ -1,16 +1,16 @@
 -- | Frequently useful definitions for working with general prettyprinters.
-module Text.Pretty.Util where
+module Prettyprinter.Util where
 
 import Prelude
-import Text.Pretty (Doc, fillSep, text)
+import Prettyprinter (Doc, fillSep, unsafeStringWithoutNewlines)
 import Data.String.Utils as String
 
 -- | Split an input into word-sized 'Doc's.
 --
 -- >>> putDoc (tupled (words "Lorem ipsum dolor"))
 -- (Lorem, ipsum, dolor)
-words :: String -> Array (Doc String)
-words = map text <<< String.words
+words :: forall ann . String -> Array (Doc ann)
+words = map unsafeStringWithoutNewlines <<< String.words
 
 -- | Insert soft linebreaks between words, so that text is broken into multiple
 -- lines when it exceeds the available width.
@@ -25,5 +25,5 @@ words = map text <<< String.words
 -- @
 -- 'reflow' = 'fillSep' . 'words'
 -- @
-reflow :: String -> Doc String
+reflow :: forall ann . String -> Doc ann
 reflow = fillSep <<< words
