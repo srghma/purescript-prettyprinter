@@ -1,3 +1,7 @@
+# DEPRECATED IN FAVOUR OF [`purescript-codegen/purescript-prettyprinter-renderable`](https://github.com/purescript-codegen/purescript-prettyprinter-renderable)
+
+______________
+
 # `purescript-prettyprinter`
 
 A port of the Haskell [`prettyprinter`][prettyprinter] library by Wadler and friends. They did a phenomenal job of documenting the API so I suggest using their docs as your primary reference.
